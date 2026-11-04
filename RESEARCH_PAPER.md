@@ -1,72 +1,35 @@
-# État de l'Art et Implémentation : Automated Student Answer Grading (ASAG) via une Architecture "Mixture of Experts" Bilingue
+# Notes techniques : évaluation de réponses en français et en arabe
 
-## Résumé (Abstract)
-L'intégration de l'Intelligence Artificielle dans le domaine de l'éducation ouvre de nouvelles perspectives pour l'apprentissage personnalisé et l'évaluation automatisée. Ce document présente le développement d'un système d'évaluation automatisée des réponses d'étudiants (ASAG - Automated Student Answer Grading) bilingue (Français/Arabe). En s'appuyant sur l'évolution des techniques de Traitement du Langage Naturel (NLP), ce projet démontre comment la transition d'une approche classique basée sur les mots-clés vers une architecture neuronale de type **Mixture of Experts (MoE)** permet de franchir le plafond de verre des performances traditionnelles, atteignant une précision de validation de **93.2%**.
+## Périmètre
 
----
+Ce dépôt contient un prototype d'inférence ASAG (Automated Student Answer Grading), une interface Streamlit et des jeux de données préparés. Il ne contient ni les poids entraînés, ni les scripts de préparation, d'entraînement et d'évaluation permettant de reproduire les performances annoncées auparavant.
 
-## 1. Introduction : L'IA au Service de l'Éducation
-L'un des défis majeurs de l'enseignement moderne, a fortiori dans des environnements à grande échelle ou d'apprentissage en ligne (e-learning), est l'évaluation rapide, cohérente et objective des réponses textuelles ouvertes. 
+## Implémentation
 
-L'**ASAG (Automated Student Answer Grading)** représente l'une des applications les plus prometteuses de l'IA pour améliorer l'apprentissage ("Enhancing Studying"). En fournissant un feedback instantané, l'ASAG permet :
-*   **À l'étudiant** : De comprendre ses erreurs immédiatement, favorisant un apprentissage itératif.
-*   **À l'enseignant** : De s'affranchir des tâches de correction répétitives pour se concentrer sur l'accompagnement pédagogique à forte valeur ajoutée.
+Le routeur recherche des caractères de la plage Unicode `U+0600–U+06FF` dans la question et la réponse de l'étudiant. Il sélectionne l'expert arabe si cette plage est présente et l'expert français dans les autres cas. Cette règle traite aussi les textes anglais comme du français et privilégie l'arabe pour les textes mixtes.
 
-Cependant, évaluer une réponse nécessite de comprendre son *sens* (sémantique) et non de simplement vérifier la présence de mots-clés. Le défi est décuplé dans des environnements éducatifs bilingues (comme au Maghreb ou au Moyen-Orient) où l'étudiant peut répondre en Français ou en Arabe.
+Le nom « Mixture of Experts » désigne ici une sélection déterministe entre deux classifieurs. Il ne s'agit pas d'un réseau de routage appris. Les deux modèles sont chargés en mémoire lorsqu'ils sont disponibles.
 
----
+L'entrée neuronale associe la question et la réponse de référence, puis la réponse de l'étudiant, avec une limite de 256 tokens. Le code suppose trois classes, dans l'ordre `correct`, `partiel`, `incorrect`. Cette convention doit être vérifiée avec la configuration d'entraînement de chaque modèle.
 
-## 2. État de l'Art et Limites des Approches Traditionnelles
-Pour construire un système robuste, nous avons structuré notre recherche en suivant l'évolution historique des modèles NLP.
+Un classifieur TF-IDF/SVM peut servir de secours. Il utilise la question et la réponse de l'étudiant sans exploiter la référence. Le score softmax des experts n'est pas calibré ; aucun score de confiance n'est fourni pour le SVM.
 
-### 2.1 L'Approche Classique (Statistique)
-Les premiers systèmes ASAG reposaient sur des méthodes statistiques telles que le **TF-IDF** couplé à des classifieurs traditionnels comme les Machines à Vecteurs de Support (**SVM**).
-*   **Méthodologie** : Le texte est transformé en vecteurs basés sur la fréquence d'apparition des mots.
-*   **Limites** : Cette approche est aveugle au contexte et à la sémantique. Elle pénalise injustement un étudiant qui utilise des synonymes ou reformule correctement une idée sans utiliser les mots exacts du glossaire. 
-*   **Notre Baseline** : Dans nos expériences, cette méthode plafonnait à une précision d'environ **72%** (optimisée plus tard à 82.9% via Grid Search pour servir de modèle de secours léger).
+## Chiffres historiques
 
-### 2.2 L'Émergence des Plongements Lexicaux (SBERT)
-La deuxième phase a consisté à utiliser des modèles pré-entraînés comme **Sentence-BERT (SBERT)** pour capturer le "sens" de la phrase.
-*   **Limites** : Utilisé comme un simple "extracteur de caractéristiques" gelé (*frozen*), SBERT comprend le langage général, mais n'est pas "expert" dans l'évaluation de copies d'étudiants selon un barème strict. 
-*   **Résultat** : Une amélioration modérée atteignant **77%**.
+Les notebooks reprennent des valeurs saisies manuellement : 72 % pour TF-IDF/SVM, 77 % pour SBERT/SVM, 82,93 % pour un SVM optimisé, 85,8 % pour un Transformer ajusté, 93,2 % pour l'expert français et environ 90 % pour l'expert arabe. Les spécifications MiniLM qui y figurent sont également déclaratives, faute de checkpoints vérifiables.
 
----
+Ces chiffres ne constituent pas une évaluation reproductible. Sans journaux, prédictions, protocole de séparation et configurations, ils ne démontrent ni la supériorité du routage, ni une fiabilité en production, ni une comparaison avec des correcteurs humains. Le passage de 72 à 93,2 représente une différence de 21,2 points de pourcentage, sous réserve de comparabilité des expériences.
 
-## 3. Méthodologie et Implémentation : Architecture MoE
+## Audit des données présentes
 
-Pour surmonter ces limites, nous avons implémenté une architecture **Mixture of Experts (MoE)**, spécialisée par langue.
+Le jeu bilingue comprend 5 510 questions d'entraînement, 1 181 de validation et 1 181 de test. Les nombres de réponses associées sont respectivement 13 284, 2 802 et 2 815.
 
-### 3.1 Finetuning d'un Modèle Transformer (MiniLM)
-Plutôt que d'utiliser des modèles gelés, nous avons procédé au **Fine-tuning de bout en bout** du modèle `microsoft/Multilingual-MiniLM-L12-H384`. En ré-entraînant ce modèle de ~117 millions de paramètres spécifiquement sur des paires (Question-Réponse de référence) corrigées par des humains, le réseau a appris à juger la "justesse" sémantique.
+Des clés identiques `(langue, question, référence)` apparaissent dans plusieurs partitions : 3 entre entraînement et validation, 4 entre entraînement et test, 2 entre validation et test. Des passages de contexte sont également partagés. Dans le test, 992 des 1 181 réponses étiquetées `correct` sont identiques à la référence. Cette construction peut faciliter la tâche par rapport à des réponses naturelles reformulées ; son impact doit être mesuré.
 
-### 3.2 L'Architecture Multilingue "Mixture of Experts"
-Un modèle multilingue unique souffre souvent d'interférences entre les dialectes et les langues. L'architecture MoE résout ce problème en créant des réseaux "Experts" dédiés :
-1.  **Expert Français (`expert_fr`)** : Fine-tuné exclusivement sur le corpus francophone pour saisir les nuances et synonymes de la langue française.
-2.  **Expert Arabe (`expert_ar`)** : Fine-tuné sur le corpus arabophone, avec un preprocessing spécifique (suppression des diacritiques).
+Les scripts de génération, la provenance des annotations et les conditions de redistribution des données restent à documenter. Il n'est pas possible de conclure que les réponses ont toutes été corrigées par des humains.
 
-### 3.3 Le Routeur Intelligent (Gating Network)
-En production, le système ne sollicite pas tous les modèles simultanément. Un **Routeur Lexical basé sur l'Unicode** intercepte la réponse de l'étudiant. S'il détecte des caractères de la plage Unicode Arabe (`[\u0600-\u06FF]`), la requête est envoyée à `expert_ar`. Sinon, elle est traitée par `expert_fr`. Cela garantit un temps d'inférence minimal et évite la confusion de langage.
+## Validation à compléter
 
----
+Pour rendre les résultats vérifiables, il faut fournir les checkpoints et leur configuration, le code de préparation et d'entraînement, les versions des dépendances et les graines aléatoires. L'évaluation devrait isoler les questions et contextes selon l'objectif de généralisation, publier les métriques par langue et par classe, et tester des réponses naturelles annotées indépendamment.
 
-## 4. Résultats et Analyse Comparative
-
-L'évolution de notre architecture montre un saut qualitatif majeur grâce au Deep Learning ciblé. Nos expériences valident la supériorité de l'approche MoE :
-
-| Modèle / Architecture | Technique Principale | Rôle actuel dans le système | Précision (Accuracy) |
-| :--- | :--- | :--- | :--- |
-| **Baseline TF-IDF + SVM** | Fréquence de mots (aucun contexte) | - | ~72.00% |
-| **SBERT + SVM** | Vecteurs Sémantiques Gelés | - | ~77.00% |
-| **TF-IDF + SVM (Optimisé)**| Hyper-optimisation via Grid Search | Fallback de secours "Hors-Ligne" | 82.93% |
-| **Transformer Fine-Tuné** | Apprentissage profond de bout en bout | - | 85.80% |
-| **Mixture of Experts (FR)** | Spécialisation Linguistique | **Agent Principal d'évaluation (FR)** | **93.20%** |
-| **Mixture of Experts (AR)** | Spécialisation Linguistique | **Agent Principal d'évaluation (AR)** | **>90.00%** |
-
-*Note: La précision de 93.2% de l'expert français permet de classer de manière fiable les réponses en 'Correct', 'Partiel' et 'Incorrect', surpassant largement le consensus humain conventionnel.*
-
----
-
-## 5. Conclusion
-Le développement de ce projet ASAG confirme que l'application de l'IA à l'éducation ne se limite pas à automatiser des tâches, mais permet d'atteindre une précision d'évaluation équitable basée sur la sémantique profonde. 
-
-En passant d'une reconnaissance de mots-clés rudimentaire à une architecture **Mixture of Experts bilingue** capable d'un routage intelligent, nous avons construit un système robuste, atteignant **93.2%** de réussite. Ce type d'outil a un potentiel disruptif pour les plateformes d'apprentissage e-learning, permettant de réduire la charge enseignante tout en offrant un suivi ultra-personnalisé, multilingue et immédiat aux étudiants.
+Les tests du dépôt vérifient le routage et le comportement lorsque les modèles manquent. Ils ne mesurent pas la qualité des notes. Aucun déploiement public ni benchmark de latence n'est établi par les fichiers présents.
